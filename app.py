@@ -5,7 +5,7 @@ import plotly.express as px
 # --- 1. CONFIG & JUDUL ---
 st.set_page_config(page_title="Steam Paradox Analysis", layout="wide")
 
-st.title("🎮 The Steam Paradox: Popularity vs. Quality")
+st.title("🎮 The Steam Paradox: Popularity vs Quality")
 st.markdown("""
 **Analisis Data Storytelling:** Banyak orang mengira game yang *Best-Seller* pasti bagus. Aplikasi ini membandingkan data **Game Terlaris** melawan **Game Dengan Rating Tertinggi** di Steam untuk membuktikan apakah hipotesis itu benar.
 """)
@@ -80,4 +80,5 @@ if not df.empty:
             st.success("Ada hubungan positif antara popularitas dan kualitas.")
 
     except Exception as e:
+
         st.error(f"Terjadi kesalahan saat memproses data: {e}")
