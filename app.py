@@ -51,28 +51,59 @@ if not df.empty:
             df_filtered = df
 
         # --- 4. VISUALISASI ---
+        st.sidebar.header("Pengaturan Visualisasi")
+        # Slider untuk mengatur jumlah data yang ditampilkan
+        jumlah_top = st.sidebar.slider("Jumlah Top Game yang Ditampilkan:", min_value=10, max_value=100, value=10, step=10)
+
+        # Hitung tinggi grafik agar tidak gepeng. 
+        # Sedikit saya naikkan jadi 35 pixel per batang untuk ruang lebih lega.
+        dynamic_height = 200 + (jumlah_top * 35)
+
         col1, col2 = st.columns(2)
 
         with col1:
-            st.subheader("💰 Top 10 Paling Populer")
-            top_popular = df_filtered.nlargest(10, 'average_owners').sort_values('average_owners', ascending=True)
+            st.subheader(f"💰 Top {jumlah_top} Paling Populer")
+            # Ubah .nlargest(10) menjadi .nlargest(jumlah_top)
+            top_popular = df_filtered.nlargest(jumlah_top, 'average_owners').sort_values('average_owners', ascending=True)
+            
             fig_pop = px.bar(top_popular, x='average_owners', y='name', orientation='h',
                             color='positive_rate', color_continuous_scale='RdYlGn',
-                            title="Populer: Apakah Ratingnya Bagus (Hijau)?")
+                            title=f"Populer: Apakah Ratingnya Bagus (Hijau)?",
+                            height=dynamic_height) # <--- Set tinggi chart
+            
+            # [TAMBAHAN] Mengatur layout untuk membuat batang lebih tebal
+            fig_pop.update_layout(
+                bargap=0.2, # Mengurangi jarak antar batang (nilai 0 sampai 1)
+                yaxis={'categoryorder':'total ascending'}, # Memastikan urutan benar
+                margin=dict(l=150) # Memberi ruang lebih untuk nama game yang panjang
+            )
+            
             st.plotly_chart(fig_pop, use_container_width=True)
 
         with col2:
-            st.subheader("⭐ Top 10 Paling Disukai")
-            top_quality = df_filtered.nlargest(10, 'positive_rate').sort_values('positive_rate', ascending=True)
+            st.subheader(f"⭐ Top {jumlah_top} Paling Disukai")
+            # Ubah .nlargest(10) menjadi .nlargest(jumlah_top)
+            top_quality = df_filtered.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+            
             fig_qual = px.bar(top_quality, x='positive_rate', y='name', orientation='h',
                             color='average_owners', color_continuous_scale='Blues',
-                            title="Kualitas: Seberapa Populer (Biru Tua)?")
+                            title=f"Kualitas: Seberapa Populer (Biru Tua)?",
+                            height=dynamic_height) # <--- Set tinggi chart
+            
+            # [TAMBAHAN] Mengatur layout untuk membuat batang lebih tebal
+            fig_qual.update_layout(
+                bargap=0.2, # Mengurangi jarak antar batang (nilai 0 sampai 1)
+                yaxis={'categoryorder':'total ascending'}, # Memastikan urutan benar
+                margin=dict(l=150) # Memberi ruang lebih untuk nama game yang panjang
+            )
+            
             st.plotly_chart(fig_qual, use_container_width=True)
 
         # --- 5. KESIMPULAN ---
         st.write("---")
+        # Korelasi tetap dihitung dari SELURUH data yang difilter, bukan cuma Top 100 agar akurat
         correlation = df_filtered['average_owners'].corr(df_filtered['positive_rate'])
-        st.metric("Korelasi (Popularitas vs Kualitas)", f"{correlation:.4f}")
+        st.metric("Korelasi Global (Popularitas vs Kualitas)", f"{correlation:.4f}")
         
         if correlation < 0.2:
             st.warning(f"**Paradoks Terbukti:** Korelasi sangat rendah ({correlation:.2f}). Game laris tidak menjamin kepuasan tinggi.")
@@ -80,5 +111,4 @@ if not df.empty:
             st.success("Ada hubungan positif antara popularitas dan kualitas.")
 
     except Exception as e:
-
         st.error(f"Terjadi kesalahan saat memproses data: {e}")
