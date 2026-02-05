@@ -50,65 +50,104 @@ if not df.empty:
         else:
             df_filtered = df
 
-        # --- 4. VISUALISASI ---
+        # --- 4. VISUALISASI (GRID LAYOUT) ---
         st.sidebar.header("Pengaturan Visualisasi")
-        # Slider untuk mengatur jumlah data yang ditampilkan
-        jumlah_top = st.sidebar.slider("Jumlah Top Game yang Ditampilkan:", min_value=10, max_value=100, value=10, step=10)
+        jumlah_top = st.sidebar.slider("Jumlah Top Game:", 10, 50, 10, 10)
+        
+        # Tinggi grafik dinamis
+        h_chart = 200 + (jumlah_top * 30)
 
-        # Hitung tinggi grafik agar tidak gepeng. 
-        # Sedikit saya naikkan jadi 35 pixel per batang untuk ruang lebih lega.
-        dynamic_height = 200 + (jumlah_top * 35)
+        st.markdown("### 1️⃣ Zona Mainstream (Owners > 200k)")
+        st.caption("Game-game besar yang sering dibicarakan orang. Apakah kualitasnya sebanding dengan popularitasnya?")
 
-        col1, col2 = st.columns(2)
+        # Filter Data Mainstream
+        mainstream_games = df_filtered[df_filtered['average_owners'] >= 200000].copy()
 
-        with col1:
-            st.subheader(f"💰 Top {jumlah_top} Paling Populer")
-            # Ubah .nlargest(10) menjadi .nlargest(jumlah_top)
-            top_popular = df_filtered.nlargest(jumlah_top, 'average_owners').sort_values('average_owners', ascending=True)
+        if not mainstream_games.empty:
+            col1, col2 = st.columns(2)
             
-            fig_pop = px.bar(top_popular, x='average_owners', y='name', orientation='h',
-                            color='positive_rate', color_continuous_scale='RdYlGn',
-                            title=f"Populer: Apakah Ratingnya Bagus (Hijau)?",
-                            height=dynamic_height) # <--- Set tinggi chart
-            
-            # [TAMBAHAN] Mengatur layout untuk membuat batang lebih tebal
-            fig_pop.update_layout(
-                bargap=0.2, # Mengurangi jarak antar batang (nilai 0 sampai 1)
-                yaxis={'categoryorder':'total ascending'}, # Memastikan urutan benar
-                margin=dict(l=150) # Memberi ruang lebih untuk nama game yang panjang
-            )
-            
-            st.plotly_chart(fig_pop, use_container_width=True)
+            with col1:
+                st.subheader(f"✅ Worth The Hype")
+                # Top Rated di Mainstream
+                top_hype = mainstream_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+                
+                fig_hype = px.bar(top_hype, x='positive_rate', y='name', orientation='h',
+                                color='average_owners', color_continuous_scale='Greens',
+                                title="Populer & Dicintai Gamer", labels={'positive_rate': 'Rating (%)'},
+                                height=h_chart)
+                fig_hype.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_hype, use_container_width=True)
 
-        with col2:
-            st.subheader(f"⭐ Top {jumlah_top} Paling Disukai")
-            # Ubah .nlargest(10) menjadi .nlargest(jumlah_top)
-            top_quality = df_filtered.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+            with col2:
+                st.subheader(f"❌ Overrated")
+                # Lowest Rated di Mainstream (nsmallest)
+                top_over = mainstream_games.nsmallest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+                
+                fig_over = px.bar(top_over, x='positive_rate', y='name', orientation='h',
+                                color='average_owners', color_continuous_scale='Reds',
+                                title="Populer tapi Banyak Hate", labels={'positive_rate': 'Rating (%)'},
+                                height=h_chart)
+                fig_over.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_over, use_container_width=True)
+        else:
+            st.warning("Tidak ada game Mainstream (>200k owners) di genre ini.")
+
+        st.write("---")
+        st.markdown("### 2️⃣ Zona Penemuan Baru (Niche & Hidden Gems)")
+        
+        col3, col4 = st.columns(2)
+
+        # Filter Data Niche (50k - 200k)
+        niche_games = df_filtered[
+            (df_filtered['average_owners'] >= 50000) & 
+            (df_filtered['average_owners'] < 200000)
+        ].copy()
+
+        with col3:
+            st.subheader(f"🎭 Niche Favorites")
+            st.caption("Game 'Kelas Menengah' (50k-200k Owners). Punya komunitas setia.")
             
-            fig_qual = px.bar(top_quality, x='positive_rate', y='name', orientation='h',
-                            color='average_owners', color_continuous_scale='Blues',
-                            title=f"Kualitas: Seberapa Populer (Biru Tua)?",
-                            height=dynamic_height) # <--- Set tinggi chart
+            if not niche_games.empty:
+                top_niche = niche_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+                
+                fig_niche = px.bar(top_niche, x='positive_rate', y='name', orientation='h',
+                                color='total_ratings', color_continuous_scale='Teal',
+                                title="Jagoan Komunitas", labels={'positive_rate': 'Rating (%)'},
+                                height=h_chart)
+                fig_niche.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_niche, use_container_width=True)
+            else:
+                st.info("Tidak ada game Niche di kategori ini.")
+
+        # Filter Data Hidden Gems (< 50k)
+        # Tetap pakai filter minimal 100 review agar tidak muncul game abal-abal
+        hidden_games = df_filtered[
+            (df_filtered['average_owners'] < 50000) & 
+            (df_filtered['total_ratings'] > 100)
+        ].copy()
+
+        with col4:
+            st.subheader(f"💎 Hidden Gems")
+            st.caption("Game 'Bawah Tanah' (<50k Owners). Jarang terdengar tapi rating tinggi.")
             
-            # [TAMBAHAN] Mengatur layout untuk membuat batang lebih tebal
-            fig_qual.update_layout(
-                bargap=0.2, # Mengurangi jarak antar batang (nilai 0 sampai 1)
-                yaxis={'categoryorder':'total ascending'}, # Memastikan urutan benar
-                margin=dict(l=150) # Memberi ruang lebih untuk nama game yang panjang
-            )
-            
-            st.plotly_chart(fig_qual, use_container_width=True)
+            if not hidden_games.empty:
+                top_hidden = hidden_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+                
+                fig_hidden = px.bar(top_hidden, x='positive_rate', y='name', orientation='h',
+                                color='total_ratings', color_continuous_scale='Viridis',
+                                title="Harta Karun Tersembunyi", labels={'positive_rate': 'Rating (%)'},
+                                height=h_chart)
+                fig_hidden.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
+                st.plotly_chart(fig_hidden, use_container_width=True)
+            else:
+                st.info("Tidak ada Hidden Gems yang valid (>100 reviews) di kategori ini.")
 
         # --- 5. KESIMPULAN ---
         st.write("---")
-        # Korelasi tetap dihitung dari SELURUH data yang difilter, bukan cuma Top 100 agar akurat
-        correlation = df_filtered['average_owners'].corr(df_filtered['positive_rate'])
-        st.metric("Korelasi Global (Popularitas vs Kualitas)", f"{correlation:.4f}")
+        st.metric("Total Game Dianalisis", len(df_filtered))
         
-        if correlation < 0.2:
-            st.warning(f"**Paradoks Terbukti:** Korelasi sangat rendah ({correlation:.2f}). Game laris tidak menjamin kepuasan tinggi.")
-        else:
-            st.success("Ada hubungan positif antara popularitas dan kualitas.")
-
+    except Exception as e:
+        st.error(f"Terjadi kesalahan: {e}")
     except Exception as e:
         st.error(f"Terjadi kesalahan saat memproses data: {e}")
+
