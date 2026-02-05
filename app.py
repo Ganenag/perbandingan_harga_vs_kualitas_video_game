@@ -5,16 +5,16 @@ import plotly.express as px
 # --- 1. CONFIG & JUDUL ---
 st.set_page_config(page_title="Steam Paradox Analysis", layout="wide")
 
-st.title("🎮 The Steam Paradox: Popularity vs Quality")
+st.title("🎮 The Steam Paradox: Popularity vs. Quality")
 st.markdown("""
-**Analisis Data Storytelling:** Banyak orang mengira game yang *Best-Seller* pasti bagus. Aplikasi ini membandingkan data **Game Terlaris** melawan **Game Dengan Rating Tertinggi** di Steam untuk membuktikan apakah hipotesis itu benar.
+**Analisis Data Storytelling:** Banyak orang mengira game yang *Best-Seller* pasti bagus. 
+Aplikasi ini membandingkan data **Game Terlaris** melawan **Game Dengan Rating Tertinggi** di Steam untuk membuktikan apakah hipotesis itu benar.
 """)
 st.write("---")
 
 # --- 2. PREPARASI DATA ---
 @st.cache_data
 def load_data():
-    # Membaca file steam.csv
     try:
         df = pd.read_csv('steam.csv')
     except FileNotFoundError:
@@ -40,7 +40,8 @@ df = load_data()
 if not df.empty:
     # --- 3. SIDEBAR FILTER ---
     st.sidebar.header("Filter Data")
-    # Mengambil daftar genre unik
+    
+    # Filter Genre
     try:
         genre_list = df['genres'].str.split(';').explode().unique()
         selected_genre = st.sidebar.selectbox("Pilih Genre Game:", ["All Genres"] + sorted(list(genre_list)))
@@ -49,105 +50,126 @@ if not df.empty:
             df_filtered = df[df['genres'].str.contains(selected_genre, na=False)]
         else:
             df_filtered = df
+    except:
+        df_filtered = df
 
-        # --- 4. VISUALISASI (GRID LAYOUT) ---
-        st.sidebar.header("Pengaturan Visualisasi")
-        jumlah_top = st.sidebar.slider("Jumlah Top Game:", 10, 50, 10, 10)
+    # Slider untuk jumlah data (berlaku untuk semua grafik)
+    jumlah_top = st.sidebar.slider("Jumlah Game yang Ditampilkan:", min_value=10, max_value=100, value=10, step=10)
+    
+    # Hitung tinggi grafik dinamis
+    dynamic_height = 200 + (jumlah_top * 30)
+
+    # --- 4. VISUALISASI UTAMA: POPULARITAS VS KUALITAS ---
+    st.header("📊 Analisis Utama: The Paradox")
+    st.caption("Membandingkan langsung antara game yang paling banyak dibeli dengan game yang paling disukai user.")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.subheader(f"💰 Top {jumlah_top} Paling Populer")
+        # Diurutkan berdasarkan OWNERS
+        top_popular = df_filtered.nlargest(jumlah_top, 'average_owners').sort_values('average_owners', ascending=True)
         
-        # Tinggi grafik dinamis
-        h_chart = 200 + (jumlah_top * 30)
+        fig_pop = px.bar(top_popular, x='average_owners', y='name', orientation='h',
+                        color='positive_rate', color_continuous_scale='RdYlGn',
+                        title="Populer: Apakah Ratingnya Bagus (Hijau)?",
+                        height=dynamic_height)
+        
+        fig_pop.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_pop, use_container_width=True)
 
-        st.markdown("### 1️⃣ Zona Mainstream (Owners > 200k)")
-        st.caption("Game-game besar yang sering dibicarakan orang. Apakah kualitasnya sebanding dengan popularitasnya?")
+    with col2:
+        st.subheader(f"⭐ Top {jumlah_top} Paling Disukai")
+        # Diurutkan berdasarkan RATING
+        top_quality = df_filtered.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
+        
+        fig_qual = px.bar(top_quality, x='positive_rate', y='name', orientation='h',
+                        color='average_owners', color_continuous_scale='Blues',
+                        title="Kualitas: Seberapa Populer (Biru Tua)?",
+                        height=dynamic_height)
+        
+        fig_qual.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
+        st.plotly_chart(fig_qual, use_container_width=True)
 
-        # Filter Data Mainstream
+    # --- KESIMPULAN PARADOKS ---
+    correlation = df_filtered['average_owners'].corr(df_filtered['positive_rate'])
+    st.metric("Skor Korelasi (Popularitas vs Kualitas)", f"{correlation:.4f}")
+    
+    if correlation < 0.2:
+        st.warning(f"**Paradoks Terkonfirmasi:** Korelasi sangat rendah ({correlation:.2f}). Menjadi populer tidak menjamin game tersebut disukai (rating tinggi).")
+    else:
+        st.success("Paradoks tidak terbukti di genre ini. Ada hubungan positif antara popularitas dan kualitas.")
+
+    st.write("---")
+
+    # --- 5. FITUR EXTRA: SEGMENTASI PASAR (Deep Dive) ---
+    # Menggunakan Expander agar tidak memenuhi layar jika user tidak ingin melihatnya
+    with st.expander("🔍 Klik untuk melihat Analisis Detail (Underrated, Hype, & Overrated)", expanded=True):
+        st.header("Analisis 4 Kuadran: Hype vs Hidden Gems")
+        st.markdown("""
+        Kami membagi game menjadi 3 kelas berdasarkan jumlah pemilik (*Owners*):
+        - **Mainstream:** > 200.000 owners (Game Hype & Overrated ada di sini)
+        - **Niche:** 50.000 - 200.000 owners (Game komunitas)
+        - **Hidden Gems:** < 50.000 owners (Game bagus yang jarang diketahui)
+        """)
+        
+        # --- ZONA MAINSTREAM ---
+        st.subheader("1️⃣ Zona Mainstream (>200k Owners)")
         mainstream_games = df_filtered[df_filtered['average_owners'] >= 200000].copy()
-
+        
         if not mainstream_games.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader(f"✅ Worth The Hype")
-                # Top Rated di Mainstream
+            c1, c2 = st.columns(2)
+            with c1:
+                st.caption("✅ Worth The Hype (Populer & Bagus)")
                 top_hype = mainstream_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                
                 fig_hype = px.bar(top_hype, x='positive_rate', y='name', orientation='h',
                                 color='average_owners', color_continuous_scale='Greens',
-                                title="Populer & Dicintai Gamer", labels={'positive_rate': 'Rating (%)'},
-                                height=h_chart)
+                                height=dynamic_height)
                 fig_hype.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_hype, use_container_width=True)
-
-            with col2:
-                st.subheader(f"❌ Overrated")
-                # Lowest Rated di Mainstream (nsmallest)
+            
+            with c2:
+                st.caption("❌ Overrated (Populer tapi Rating Rendah)")
                 top_over = mainstream_games.nsmallest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                
                 fig_over = px.bar(top_over, x='positive_rate', y='name', orientation='h',
                                 color='average_owners', color_continuous_scale='Reds',
-                                title="Populer tapi Banyak Hate", labels={'positive_rate': 'Rating (%)'},
-                                height=h_chart)
+                                height=dynamic_height)
                 fig_over.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_over, use_container_width=True)
         else:
-            st.warning("Tidak ada game Mainstream (>200k owners) di genre ini.")
+            st.info("Tidak ada data Mainstream di genre ini.")
 
-        st.write("---")
-        st.markdown("### 2️⃣ Zona Penemuan Baru (Niche & Hidden Gems)")
+        # --- ZONA NICHE & HIDDEN ---
+        st.subheader("2️⃣ Zona Penemuan (Niche & Indie)")
+        c3, c4 = st.columns(2)
         
-        col3, col4 = st.columns(2)
-
-        # Filter Data Niche (50k - 200k)
-        niche_games = df_filtered[
-            (df_filtered['average_owners'] >= 50000) & 
-            (df_filtered['average_owners'] < 200000)
-        ].copy()
-
-        with col3:
-            st.subheader(f"🎭 Niche Favorites")
-            st.caption("Game 'Kelas Menengah' (50k-200k Owners). Punya komunitas setia.")
-            
+        # Niche
+        niche_games = df_filtered[(df_filtered['average_owners'] >= 50000) & (df_filtered['average_owners'] < 200000)].copy()
+        with c3:
+            st.caption("🎭 Niche Favorites (50k - 200k Owners)")
             if not niche_games.empty:
                 top_niche = niche_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                
                 fig_niche = px.bar(top_niche, x='positive_rate', y='name', orientation='h',
                                 color='total_ratings', color_continuous_scale='Teal',
-                                title="Jagoan Komunitas", labels={'positive_rate': 'Rating (%)'},
-                                height=h_chart)
+                                height=dynamic_height)
                 fig_niche.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_niche, use_container_width=True)
             else:
-                st.info("Tidak ada game Niche di kategori ini.")
+                st.info("Data kosong.")
 
-        # Filter Data Hidden Gems (< 50k)
-        # Tetap pakai filter minimal 100 review agar tidak muncul game abal-abal
-        hidden_games = df_filtered[
-            (df_filtered['average_owners'] < 50000) & 
-            (df_filtered['total_ratings'] > 100)
-        ].copy()
-
-        with col4:
-            st.subheader(f"💎 Hidden Gems")
-            st.caption("Game 'Bawah Tanah' (<50k Owners). Jarang terdengar tapi rating tinggi.")
-            
+        # Hidden Gems
+        hidden_games = df_filtered[(df_filtered['average_owners'] < 50000) & (df_filtered['total_ratings'] > 100)].copy()
+        with c4:
+            st.caption("💎 Hidden Gems (< 50k Owners)")
             if not hidden_games.empty:
                 top_hidden = hidden_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                
                 fig_hidden = px.bar(top_hidden, x='positive_rate', y='name', orientation='h',
                                 color='total_ratings', color_continuous_scale='Viridis',
-                                title="Harta Karun Tersembunyi", labels={'positive_rate': 'Rating (%)'},
-                                height=h_chart)
+                                height=dynamic_height)
                 fig_hidden.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
                 st.plotly_chart(fig_hidden, use_container_width=True)
             else:
-                st.info("Tidak ada Hidden Gems yang valid (>100 reviews) di kategori ini.")
+                st.info("Data kosong.")
 
-        # --- 5. KESIMPULAN ---
-        st.write("---")
-        st.metric("Total Game Dianalisis", len(df_filtered))
-        
-    except Exception as e:
-        st.error(f"Terjadi kesalahan: {e}")
-    except Exception as e:
-        st.error(f"Terjadi kesalahan saat memproses data: {e}")
-
+    st.write("---")
+    st.caption(f"Total Database: {len(df)} Games | Filtered: {len(df_filtered)} Games")
