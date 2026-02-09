@@ -7,8 +7,8 @@ st.set_page_config(page_title="Steam Paradox Analysis", layout="wide")
 
 st.title("🎮 The Steam Paradox: Popularity vs. Quality")
 st.markdown("""
-**Analisis Data Storytelling:** Banyak orang mengira game yang *Best-Seller* pasti bagus. 
-Aplikasi ini membandingkan data **Game Terlaris** melawan **Game Dengan Rating Tertinggi** di Steam untuk membuktikan apakah hipotesis itu benar.
+**Analisis Data Storytelling:** Apakah game populer selalu bagus? 
+Aplikasi ini membedah hubungan **Popularitas (Owners)** vs **Kualitas (Rating)** dan mengelompokkan game ke dalam 4 kuadran psikologis.
 """)
 st.write("---")
 
@@ -16,160 +16,233 @@ st.write("---")
 @st.cache_data
 def load_data():
     try:
-        df = pd.read_csv('steam.csv')
+        df = pd.read_csv('games_selected.csv')
     except FileNotFoundError:
-        st.error("File 'steam.csv' belum diupload! Silakan upload ke panel kiri.")
+        st.error("File 'games_selected.csv' tidak ditemukan!")
         return pd.DataFrame()
 
+    # --- A. Parsing Owners ---
     def parse_owners(x):
         if isinstance(x, str):
-            low, high = x.split('-')
-            return (int(low) + int(high)) / 2
+            parts = x.split('-')
+            if len(parts) == 2:
+                low = parts[0].replace(',', '').strip()
+                high = parts[1].replace(',', '').strip()
+                if low.isdigit() and high.isdigit():
+                    return (int(low) + int(high)) / 2
         return 0
     
-    df['average_owners'] = df['owners'].apply(parse_owners)
-    df['total_ratings'] = df['positive_ratings'] + df['negative_ratings']
+    df['average_owners'] = df['Owners'].apply(parse_owners)
     
-    # Filter minimal 100 review agar data valid
+    # --- B. Feature Engineering ---
+    df['total_ratings'] = df['Positive'] + df['Negative']
+    df['positive_rate'] = df.apply(
+        lambda x: (x['Positive'] / x['total_ratings']) if x['total_ratings'] > 0 else 0, axis=1
+    )
+    
+    # Filter Noise (Min 100 review)
     df_clean = df[df['total_ratings'] > 100].copy()
-    df_clean['positive_rate'] = (df_clean['positive_ratings'] / df_clean['total_ratings']) * 100
+
+    # --- C. Klasifikasi Kategori (Logika Final) ---
+    def classify_game(row):
+        MILLION_BAR = 1000000  # 1 Juta
+        MID_BAR = 50000        # 50 Ribu
+        
+        HIGH_SCORE = 0.85      # 85%
+        SUPER_SCORE = 0.90     # 90%
+        LOW_SCORE = 0.60       # 60%
+        
+        pos_rate = row['positive_rate']
+        owners = row['average_owners']
+        
+        if owners >= MILLION_BAR:
+            if pos_rate >= HIGH_SCORE:
+                return "🔥 Worth the Hype"
+            elif pos_rate <= LOW_SCORE:
+                return "🥀 Overrated"
+            else:
+                return "Popular"
+        elif owners >= MID_BAR:
+            if pos_rate >= SUPER_SCORE:
+                return "⭐ Underrated"
+            else:
+                return "Mainstream"
+        else: # < 50k
+            if pos_rate >= SUPER_SCORE:
+                return "💎 Hidden Gem"
+            else:
+                return "Niche"
+
+    df_clean['Category'] = df_clean.apply(classify_game, axis=1)
+    
+    # --- D. Parsing Genre (Untuk Filter) ---
+    df_clean['Genres'] = df_clean['Genres'].fillna('')
+    
     return df_clean
 
 df = load_data()
+if df.empty:
+    st.stop()
 
-if not df.empty:
-    # --- 3. SIDEBAR FILTER ---
-    st.sidebar.header("Filter Data")
+# --- 3. SIDEBAR FILTER ---
+st.sidebar.header("🔍 Filter & Pengaturan")
+
+# A. Pengaturan Jumlah Data (FITUR BARU)
+top_n = st.sidebar.slider("Jumlah Data Ditampilkan (Top N)", 5, 100, 10, step=5)
+
+# B. Filter Genre
+all_genres = set()
+for genres_str in df['Genres']:
+    if genres_str:
+        for g in genres_str.split(','):
+            all_genres.add(g.strip())
+sorted_genres = sorted(list(all_genres))
+
+selected_genres = st.sidebar.multiselect("Pilih Genre", sorted_genres, default=[])
+
+# C. Filter Slider Data
+min_owners = st.sidebar.slider("Minimal Owners", 0, 1000000, 10000, step=10000)
+min_rating = st.sidebar.slider("Minimal Positive Rate", 0.0, 1.0, 0.5, step=0.05)
+
+# --- LOGIKA FILTERING ---
+df_filtered = df.copy()
+
+if selected_genres:
+    mask = df_filtered['Genres'].apply(lambda x: any(g in x for g in selected_genres))
+    df_filtered = df_filtered[mask]
+
+df_filtered = df_filtered[
+    (df_filtered['average_owners'] >= min_owners) & 
+    (df_filtered['positive_rate'] >= min_rating)
+]
+
+st.sidebar.markdown("---")
+st.sidebar.write(f"**Total Data Tersaring:** {len(df_filtered)} Games")
+
+# --- 4. VISUALISASI 1: TOP SELLERS vs TOP RATED (DIKEMBALIKAN) ---
+st.subheader("1. The Popularity Paradox: Top Sellers vs Top Rated")
+st.caption(f"Membandingkan {top_n} Game Terlaris vs {top_n} Game dengan Rating Tertinggi. Perhatikan perbedaan warnanya.")
+
+c1, c2 = st.columns(2)
+
+# Hitung tinggi chart dinamis agar tidak bertumpuk jika data banyak
+dynamic_height = 400 + (top_n * 20)
+
+# Chart 1: Top Sellers
+with c1:
+    st.markdown(f"**🏆 Top {top_n} Paling Laris (Owners)**")
+    top_sellers = df_filtered.nlargest(top_n, 'average_owners').sort_values('average_owners', ascending=True)
     
-    # Filter Genre
-    try:
-        genre_list = df['genres'].str.split(';').explode().unique()
-        selected_genre = st.sidebar.selectbox("Pilih Genre Game:", ["All Genres"] + sorted(list(genre_list)))
-
-        if selected_genre != "All Genres":
-            df_filtered = df[df['genres'].str.contains(selected_genre, na=False)]
-        else:
-            df_filtered = df
-    except:
-        df_filtered = df
-
-    # Slider untuk jumlah data (berlaku untuk semua grafik)
-    jumlah_top = st.sidebar.slider("Jumlah Game yang Ditampilkan:", min_value=10, max_value=100, value=10, step=10)
-    
-    # Hitung tinggi grafik dinamis
-    dynamic_height = 200 + (jumlah_top * 30)
-
-    # --- 4. VISUALISASI UTAMA: POPULARITAS VS KUALITAS ---
-    st.header("📊 Analisis Utama: The Paradox")
-    st.caption("Membandingkan langsung antara game yang paling banyak dibeli dengan game yang paling disukai user.")
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        st.subheader(f"💰 Top {jumlah_top} Paling Populer")
-        # Diurutkan berdasarkan OWNERS
-        top_popular = df_filtered.nlargest(jumlah_top, 'average_owners').sort_values('average_owners', ascending=True)
-        
-        fig_pop = px.bar(top_popular, x='average_owners', y='name', orientation='h',
-                        color='positive_rate', color_continuous_scale='RdYlGn',
-                        title="Populer: Apakah Ratingnya Bagus (Hijau)?",
-                        height=dynamic_height)
-        
-        fig_pop.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_pop, use_container_width=True)
-
-    with col2:
-        st.subheader(f"⭐ Top {jumlah_top} Paling Disukai")
-        # Diurutkan berdasarkan RATING
-        top_quality = df_filtered.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-        
-        fig_qual = px.bar(top_quality, x='positive_rate', y='name', orientation='h',
-                        color='average_owners', color_continuous_scale='Blues',
-                        title="Kualitas: Seberapa Populer (Biru Tua)?",
-                        height=dynamic_height)
-        
-        fig_qual.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
-        st.plotly_chart(fig_qual, use_container_width=True)
-
-    # --- KESIMPULAN PARADOKS ---
-    correlation = df_filtered['average_owners'].corr(df_filtered['positive_rate'])
-    st.metric("Skor Korelasi (Popularitas vs Kualitas)", f"{correlation:.4f}")
-    
-    if correlation < 0.2:
-        st.warning(f"**Paradoks Terkonfirmasi:** Korelasi sangat rendah ({correlation:.2f}). Menjadi populer tidak menjamin game tersebut disukai (rating tinggi).")
+    if not top_sellers.empty:
+        fig_sellers = px.bar(
+            top_sellers, x='average_owners', y='Name', orientation='h',
+            color='positive_rate', color_continuous_scale='RdBu',
+            range_color=[0.5, 1.0], # Merah (Jelek) ke Biru (Bagus)
+            height=dynamic_height,
+            title="Banyak Pemain Belum Tentu Bagus (Lihat Warna)"
+        )
+        st.plotly_chart(fig_sellers, use_container_width=True)
     else:
-        st.success("Paradoks tidak terbukti di genre ini. Ada hubungan positif antara popularitas dan kualitas.")
+        st.warning("Data tidak cukup.")
 
-    st.write("---")
+# Chart 2: Top Rated
+with c2:
+    st.markdown(f"**❤️ Top {top_n} Rating Tertinggi (Quality)**")
+    top_rated = df_filtered.nlargest(top_n, 'positive_rate').sort_values('positive_rate', ascending=True)
+    
+    if not top_rated.empty:
+        fig_rated = px.bar(
+            top_rated, x='positive_rate', y='Name', orientation='h',
+            color='average_owners', color_continuous_scale='Viridis',
+            height=dynamic_height,
+            title="Game Terbaik Seringkali Kurang Populer (Lihat Warna)"
+        )
+        st.plotly_chart(fig_rated, use_container_width=True)
+    else:
+        st.warning("Data tidak cukup.")
 
-    # --- 5. FITUR EXTRA: SEGMENTASI PASAR (Deep Dive) ---
-    # Menggunakan Expander agar tidak memenuhi layar jika user tidak ingin melihatnya
-    with st.expander("🔍 Klik untuk melihat Analisis Detail (Underrated, Hype, & Overrated)", expanded=True):
-        st.header("Analisis 4 Kuadran: Hype vs Hidden Gems")
-        st.markdown("""
-        Kami membagi game menjadi 3 kelas berdasarkan jumlah pemilik (*Owners*):
-        - **Mainstream:** > 200.000 owners (Game Hype & Overrated ada di sini)
-        - **Niche:** 50.000 - 200.000 owners (Game komunitas)
-        - **Hidden Gems:** < 50.000 owners (Game bagus yang jarang diketahui)
-        """)
-        
-        # --- ZONA MAINSTREAM ---
-        st.subheader("1️⃣ Zona Mainstream (>200k Owners)")
-        mainstream_games = df_filtered[df_filtered['average_owners'] >= 200000].copy()
-        
-        if not mainstream_games.empty:
-            c1, c2 = st.columns(2)
-            with c1:
-                st.caption("✅ Worth The Hype (Populer & Bagus)")
-                top_hype = mainstream_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                fig_hype = px.bar(top_hype, x='positive_rate', y='name', orientation='h',
-                                color='average_owners', color_continuous_scale='Greens',
-                                height=dynamic_height)
-                fig_hype.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_hype, use_container_width=True)
-            
-            with c2:
-                st.caption("❌ Overrated (Populer tapi Rating Rendah)")
-                top_over = mainstream_games.nsmallest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                fig_over = px.bar(top_over, x='positive_rate', y='name', orientation='h',
-                                color='average_owners', color_continuous_scale='Reds',
-                                height=dynamic_height)
-                fig_over.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_over, use_container_width=True)
-        else:
-            st.info("Tidak ada data Mainstream di genre ini.")
+st.write("---")
 
-        # --- ZONA NICHE & HIDDEN ---
-        st.subheader("2️⃣ Zona Penemuan (Niche & Indie)")
-        c3, c4 = st.columns(2)
-        
-        # Niche
-        niche_games = df_filtered[(df_filtered['average_owners'] >= 50000) & (df_filtered['average_owners'] < 200000)].copy()
-        with c3:
-            st.caption("🎭 Niche Favorites (50k - 200k Owners)")
-            if not niche_games.empty:
-                top_niche = niche_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                fig_niche = px.bar(top_niche, x='positive_rate', y='name', orientation='h',
-                                color='total_ratings', color_continuous_scale='Teal',
-                                height=dynamic_height)
-                fig_niche.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_niche, use_container_width=True)
-            else:
-                st.info("Data kosong.")
+# --- 5. VISUALISASI 2: SCATTER PLOT (KUADRAN) ---
+st.subheader("2. Peta Persebaran Game (Scatter Plot)")
+st.caption("Lihat posisi game favoritmu berdasarkan filter Genre & Popularitas.")
 
-        # Hidden Gems
-        hidden_games = df_filtered[(df_filtered['average_owners'] < 50000) & (df_filtered['total_ratings'] > 100)].copy()
-        with c4:
-            st.caption("💎 Hidden Gems (< 50k Owners)")
-            if not hidden_games.empty:
-                top_hidden = hidden_games.nlargest(jumlah_top, 'positive_rate').sort_values('positive_rate', ascending=True)
-                fig_hidden = px.bar(top_hidden, x='positive_rate', y='name', orientation='h',
-                                color='total_ratings', color_continuous_scale='Viridis',
-                                height=dynamic_height)
-                fig_hidden.update_layout(bargap=0.2, margin=dict(l=150), yaxis={'categoryorder':'total ascending'})
-                st.plotly_chart(fig_hidden, use_container_width=True)
-            else:
-                st.info("Data kosong.")
+if not df_filtered.empty:
+    fig_scatter = px.scatter(
+        df_filtered, 
+        x="average_owners", 
+        y="positive_rate", 
+        color="Category",
+        hover_name="Name",
+        hover_data=["Genres"],
+        log_x=True, 
+        color_discrete_map={
+            "🔥 Worth the Hype": "#FFD700",
+            "🥀 Overrated": "#FF4B4B",
+            "⭐ Underrated": "#00CC96",
+            "💎 Hidden Gem": "#AB63FA",
+            "Popular": "#7F7F7F",           
+            "Mainstream": "#A0A0A0",
+            "Niche": "#D3D3D3"
+        },
+        title=f"Analisis Kuadran {'(' + ', '.join(selected_genres) + ')' if selected_genres else '(Semua Genre)'}",
+        height=600
+    )
+    st.plotly_chart(fig_scatter, use_container_width=True)
+else:
+    st.warning("Tidak ada data yang cocok dengan filter ini.")
 
-    st.write("---")
-    st.caption(f"Total Database: {len(df)} Games | Filtered: {len(df_filtered)} Games")
+st.write("---")
+
+# --- 6. TOP LIST PER KATEGORI (TABS) ---
+st.subheader("3. Hall of Fame & Wall of Shame")
+st.write(f"Jelajahi Top {top_n} game untuk setiap kategori psikologis berdasarkan filter genre di atas.")
+
+tab1, tab2, tab3, tab4 = st.tabs([
+    "🔥 Worth the Hype", 
+    "🥀 Overrated (Terburuk)", 
+    "⭐ Underrated", 
+    "💎 Hidden Gem"
+])
+
+def show_top_table(dataframe, category_name, limit, sort_ascending=False):
+    subset = dataframe[dataframe['Category'] == category_name]
+    
+    if subset.empty:
+        st.info(f"Tidak ada game kategori '{category_name}' dengan filter saat ini.")
+        return
+
+    # Sorting & Limiting (menggunakan variabel limit/top_n)
+    subset = subset.sort_values('positive_rate', ascending=sort_ascending).head(limit)
+
+    st.dataframe(
+        subset[['Name', 'Genres', 'positive_rate', 'average_owners', 'total_ratings']],
+        column_config={
+            "Name": "Nama Game",
+            "positive_rate": st.column_config.ProgressColumn(
+                "Quality Score", format="%.2f", min_value=0, max_value=1
+            ),
+            "average_owners": st.column_config.NumberColumn(
+                "Est. Owners", format="%d"
+            ),
+            "total_ratings": st.column_config.NumberColumn("Total Reviews")
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+
+with tab1:
+    st.caption(f"Top {top_n} Game Raksasa (>1 Juta Owners) dengan Rating > 85%.")
+    show_top_table(df_filtered, "🔥 Worth the Hype", limit=top_n, sort_ascending=False)
+
+with tab2:
+    st.caption(f"Top {top_n} Game Raksasa dengan Rating Terendah (Diurutkan dari yang terburuk).")
+    show_top_table(df_filtered, "🥀 Overrated", limit=top_n, sort_ascending=True)
+
+with tab3:
+    st.caption(f"Top {top_n} Game Menengah dengan Rating > 90%.")
+    show_top_table(df_filtered, "⭐ Underrated", limit=top_n, sort_ascending=False)
+
+with tab4:
+    st.caption(f"Top {top_n} Game Kecil (<50k Owners) dengan Rating > 90%.")
+    show_top_table(df_filtered, "💎 Hidden Gem", limit=top_n, sort_ascending=False)
